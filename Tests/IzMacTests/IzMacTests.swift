@@ -72,4 +72,50 @@ final class IzMacTests: XCTestCase {
         XCTAssertEqual(parseClaudeToken(Data(cred.utf8)), "tok")
         XCTAssertNil(parseClaudeToken(Data("{}".utf8)))
     }
+
+    func jsonMsg(_ s: String) -> [String: Any] {
+        (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any] ?? [:]
+    }
+
+    func testCodexAppServerExchange() {
+        var st = CodexRPC()
+        XCTAssertEqual(codexStep(jsonMsg(#"{"method":"note","params":{}}"#), state: &st), [])
+        XCTAssertEqual(st.stage, 0)
+        let l0 = codexStep(jsonMsg(#"{"id":0,"result":{"userAgent":"x"}}"#), state: &st)
+        XCTAssertEqual(l0, [#"{"method":"initialized"}"#, #"{"id":1,"method":"account/rateLimits/read"}"#])
+        let l1 = codexStep(jsonMsg(#"""
+        {"id":1,"result":{"rateLimits":{"primary":{"usedPercent":99}},"rateLimitsByLimitId":{"codex":{
+          "primary":{"usedPercent":25,"windowDurationMins":300,"resetsAt":1790000000},
+          "secondary":{"usedPercent":null,"windowDurationMins":10080,"resetsAt":1790600000}}}}}
+        """#), state: &st)
+        XCTAssertEqual(l1, [#"{"id":2,"method":"account/usage/read"}"#])
+        XCTAssertEqual(st.snapshot.windows, [CodexWindow(minutes: 300, remaining: 75, resets: Date(timeIntervalSince1970: 1790000000))])
+        let l2 = codexStep(jsonMsg(#"""
+        {"id":2,"result":{"summary":{"lifetimeTokens":1234567,"peakDailyTokens":89000},"dailyUsageBuckets":[
+          {"startDate":"2026-11-14","tokens":5000},{"startDate":"2026-11-13","tokens":100},{"startDate":"2026-11-15","tokens":null}]}}
+        """#), state: &st)
+        XCTAssertEqual(l2, [])
+        XCTAssertEqual(st.stage, 3)
+        XCTAssertNil(st.failure)
+        XCTAssertEqual(st.snapshot.lifetimeTokens, 1234567)
+        XCTAssertEqual(st.snapshot.peakDailyTokens, 89000)
+        XCTAssertEqual(st.snapshot.latestLabel, "14/11/2026")
+        XCTAssertEqual(st.snapshot.latestTokens, 5000)
+        XCTAssertNil(st.snapshot.note)
+
+        // Fallback bucket, clamping, and error replies.
+        var s2 = CodexRPC(stage: 1)
+        _ = codexStep(jsonMsg(#"{"id":1,"result":{"rateLimits":{"primary":{"usedPercent":130,"windowDurationMins":300},"secondary":{"usedPercent":40,"windowDurationMins":10080}}}}"#), state: &s2)
+        XCTAssertEqual(s2.snapshot.windows.map { $0.remaining }, [0, 60])
+        _ = codexStep(jsonMsg(#"{"id":2,"error":{"message":"no"}}"#), state: &s2)
+        XCTAssertEqual(s2.snapshot.note, "Token counts unavailable")
+        XCTAssertEqual(s2.snapshot.windows.count, 2)
+        var s3 = CodexRPC(stage: 1)
+        _ = codexStep(jsonMsg(#"{"id":1,"error":{"message":"auth"}}"#), state: &s3)
+        XCTAssertEqual(s3.failure, "Usage unavailable. Check your Codex sign-in.")
+        XCTAssertEqual(windowLabel(300), "5h")
+        XCTAssertEqual(windowLabel(10080), "Week")
+        XCTAssertEqual(windowLabel(120), "2h")
+        XCTAssertEqual(windowLabel(2880), "2d")
+    }
 }

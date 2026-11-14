@@ -109,22 +109,22 @@ struct RootView: View {
     var codex: some View {
         Card("Codex usage", accent: .blue) {
             if let c = model.codex {
-                if let p = c.primary {
-                    primary("5h: \(remainingPercent(used: p.usedPercent, resetsAt: p.resetsAt, now: model.now))% remaining")
-                    if let r = p.resetsAt { secondary(resetText(r)) }
-                }
-                if let w = c.secondary {
-                    primary("Week: \(remainingPercent(used: w.usedPercent, resetsAt: w.resetsAt, now: model.now))% remaining")
-                    if let r = w.resetsAt { secondary(resetText(r)) }
+                ForEach(Array(c.windows.enumerated()), id: \.offset) { _, w in
+                    primary("\(windowLabel(w.minutes)): \(w.remaining)% remaining")
+                    if let r = w.resets { secondary(resetText(r)) }
                 }
                 VStack(spacing: 2) {
-                    row("All-time tokens", tokenText(c.allTime))
-                    row("Peak daily tokens", tokenText(c.peakDay))
-                    row("Yesterday", tokenText(c.yesterday))
+                    if let t = c.lifetimeTokens { row("All-time tokens", tokenText(t)) }
+                    if let t = c.peakDailyTokens { row("Peak daily tokens", tokenText(t)) }
+                    if let d = c.latestLabel, let t = c.latestTokens { row("\(d):", "\(tokenText(t)) tokens") }
                 }
                 .padding(.top, 2)
+                if let n = c.note { secondary(n) }
+                if let u = c.updated {
+                    Text("Updated \(timeText(u))").font(.system(size: 10)).foregroundStyle(.gray)
+                }
             } else {
-                secondary("No Codex data")
+                secondary(model.codexMessage ?? "No Codex data")
             }
         }
     }

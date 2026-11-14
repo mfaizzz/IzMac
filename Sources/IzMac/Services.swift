@@ -21,6 +21,68 @@ func readClaudeToken() -> String? {
     return (try? Data(contentsOf: file)).flatMap(parseClaudeToken)
 }
 
+// MARK: - Codex app-server (blocking; call off the main thread)
+
+func codexBinaryPath() -> String? {
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    return [
+        "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+        "/opt/homebrew/bin/codex", "/usr/local/bin/codex", home + "/.local/bin/codex",
+    ].first { FileManager.default.isExecutableFile(atPath: $0) }
+}
+
+/// Returns (snapshot, nil) or (nil, error message). Gives up after `timeout` seconds and always stops the child.
+func runCodexAppServer(path: String, timeout: TimeInterval = 35) -> (CodexSnapshot?, String?) {
+    signal(SIGPIPE, SIG_IGN)
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: path)
+    p.arguments = ["app-server", "--stdio"]
+    let inPipe = Pipe()
+    let outPipe = Pipe()
+    p.standardInput = inPipe
+    p.standardOutput = outPipe
+    p.standardError = FileHandle.nullDevice
+    do { try p.run() } catch { return (nil, "Could not start Codex app-server") }
+    defer {
+        try? inPipe.fileHandleForWriting.close()
+        if p.isRunning {
+            p.terminate()
+            for _ in 0..<20 where p.isRunning { usleep(100_000) }
+            if p.isRunning { kill(p.processIdentifier, SIGKILL) }
+        }
+        p.waitUntilExit()
+    }
+    // Terminating the child closes its stdout, which ends the blocking read below.
+    DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+        if p.isRunning { p.terminate() }
+    }
+    func send(_ line: String) {
+        try? inPipe.fileHandleForWriting.write(contentsOf: Data((line + "\n").utf8))
+    }
+    send(codexHello)
+    var state = CodexRPC()
+    var buf = Data()
+    read: while true {
+        let chunk = outPipe.fileHandleForReading.availableData
+        if chunk.isEmpty { break }
+        buf.append(chunk)
+        while let nl = buf.firstIndex(of: 10) {
+            let line = buf.subdata(in: buf.startIndex..<nl)
+            buf.removeSubrange(buf.startIndex...nl)
+            guard let obj = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] else { continue }
+            for out in codexStep(obj, state: &state) { send(out) }
+            if state.stage == 3 { break read }
+        }
+    }
+    if let f = state.failure { return (nil, f) }
+    if state.stage == 3 { return (state.snapshot, nil) }
+    if state.stage == 2 {
+        state.snapshot.note = "Token request timed out"
+        return (state.snapshot, nil)
+    }
+    return (nil, "Codex app-server did not respond")
+}
+
 // MARK: - Location (one shot, when-in-use)
 
 final class Locator: NSObject, CLLocationManagerDelegate {

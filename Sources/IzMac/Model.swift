@@ -22,12 +22,14 @@ final class Model: ObservableObject {
     @Published var now = Date()
     @Published var quote = quotes.randomElement() ?? ""
     @Published var solat: SolatResponse?
-    @Published var codex: CodexSummary?
+    @Published var codex: CodexSnapshot?
+    @Published var codexMessage: String?
     @Published var claude: ClaudeSnapshot?
     @Published var claudeMessage: String? = "Loading..."
     @Published var battery: BatteryInfo?
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
 
+    private var codexBusy = false
     private var codexCache: [String: CachedFile] = [:]
     private var coordinate: (Double, Double)?
     private var solatFetchedOn: String?
@@ -70,8 +72,8 @@ final class Model: ObservableObject {
 
     var menuTitle: String {
         var parts: [String] = []
-        if let p = codex?.primary {
-            parts.append("Cx \(remainingPercent(used: p.usedPercent, resetsAt: p.resetsAt, now: now))%")
+        if let p = codex?.windows.first(where: { $0.minutes == 300 }) {
+            parts.append("Cx \(p.remaining)%")
         }
         if let f = claude?.five { parts.append("Cl \(f.remaining)%") }
         if let n = next { parts.append("\(n.name) \(timeText(n.date))") }
@@ -101,12 +103,24 @@ final class Model: ObservableObject {
     }
 
     private func refreshCodex() async {
+        if codexBusy { return }
+        codexBusy = true
+        defer { codexBusy = false }
+        if let bin = codexBinaryPath() {
+            let r = await Task.detached(priority: .utility) { runCodexAppServer(path: bin) }.value
+            var s = r.0
+            s?.updated = Date()
+            codex = s
+            codexMessage = r.1
+            return
+        }
+        codexMessage = nil
         let cache = codexCache
         let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")
         let t = Date()
         let result = await Task.detached(priority: .utility) { scanCodex(root: root, cache: cache, now: t) }.value
         codexCache = result.1
-        codex = result.0
+        codex = result.0.map { codexSnapshot($0, now: t) }
     }
 
     private func refreshSolat(force: Bool) async {
@@ -183,10 +197,4 @@ func resetText(_ d: Date) -> String {
     "Resets " + d.formatted(.dateTime.day().month(.abbreviated).hour().minute())
 }
 
-func tokenText(_ n: Int) -> String {
-    let d = Double(n)
-    if d >= 1e9 { return String(format: "%.2fB", d / 1e9) }
-    if d >= 1e6 { return String(format: "%.2fM", d / 1e6) }
-    if d >= 1e3 { return String(format: "%.1fK", d / 1e3) }
-    return "\(n)"
-}
+func tokenText(_ n: Int) -> String { n.formatted() }

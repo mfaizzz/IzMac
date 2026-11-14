@@ -210,3 +210,113 @@ func parseClaudeToken(_ data: Data) -> String? {
           let t = oauth["accessToken"] as? String, !t.isEmpty else { return nil }
     return t
 }
+
+// MARK: - Codex app-server (account/rateLimits/read, account/usage/read)
+
+struct CodexWindow: Equatable {
+    var minutes: Int?
+    var remaining: Int
+    var resets: Date?
+}
+
+struct CodexSnapshot: Equatable {
+    var windows: [CodexWindow] = []
+    var lifetimeTokens: Int?
+    var peakDailyTokens: Int?
+    var latestLabel: String?
+    var latestTokens: Int?
+    var note: String?
+    var updated: Date?
+}
+
+/// stage: 0 initialize sent, 1 limits requested, 2 usage requested, 3 finished.
+struct CodexRPC {
+    var stage = 0
+    var snapshot = CodexSnapshot()
+    var failure: String?
+}
+
+let codexHello = #"{"id":0,"method":"initialize","params":{"clientInfo":{"name":"izmac","version":"0.1.0"}}}"#
+
+func windowLabel(_ minutes: Int?) -> String {
+    guard let m = minutes, m > 0 else { return "Limit" }
+    if m == 300 { return "5h" }
+    if m == 10080 { return "Week" }
+    if m % 1440 == 0 { return "\(m / 1440)d" }
+    return m >= 60 ? "\(Int((Double(m) / 60).rounded()))h" : "\(m)m"
+}
+
+private func codexWindow(_ v: Any?) -> CodexWindow? {
+    guard let d = v as? [String: Any], let used = num(d["usedPercent"]) else { return nil }
+    return CodexWindow(
+        minutes: num(d["windowDurationMins"]).map { Int($0) },
+        remaining: Int(max(0, min(100, 100 - used)).rounded()),
+        resets: num(d["resetsAt"]).map { Date(timeIntervalSince1970: $0) })
+}
+
+/// Pure message handler: applies one decoded server message to `state` and returns the lines to send next.
+func codexStep(_ msg: [String: Any], state: inout CodexRPC) -> [String] {
+    guard msg["method"] == nil, let id = (msg["id"] as? NSNumber)?.intValue else { return [] }
+    let failed = msg["error"] != nil && !(msg["error"] is NSNull)
+    let result = msg["result"] as? [String: Any]
+    switch (id, state.stage) {
+    case (0, 0):
+        if failed {
+            state.failure = "Codex app-server failed to start"
+            state.stage = 3
+            return []
+        }
+        state.stage = 1
+        return [#"{"method":"initialized"}"#, #"{"id":1,"method":"account/rateLimits/read"}"#]
+    case (1, 1):
+        let byId = result?["rateLimitsByLimitId"] as? [String: Any]
+        let bucket = (byId?["codex"] as? [String: Any]) ?? (result?["rateLimits"] as? [String: Any])
+        let windows = [codexWindow(bucket?["primary"]), codexWindow(bucket?["secondary"])].compactMap { $0 }
+        if failed || result == nil {
+            state.failure = "Usage unavailable. Check your Codex sign-in."
+        } else if windows.isEmpty {
+            state.failure = "No usage windows available"
+        }
+        if state.failure != nil {
+            state.stage = 3
+            return []
+        }
+        state.snapshot.windows = windows
+        state.stage = 2
+        return [#"{"id":2,"method":"account/usage/read"}"#]
+    case (2, 2):
+        state.stage = 3
+        if failed {
+            state.snapshot.note = "Token counts unavailable"
+            return []
+        }
+        let summary = result?["summary"] as? [String: Any]
+        state.snapshot.lifetimeTokens = num(summary?["lifetimeTokens"]).map { Int($0) }
+        state.snapshot.peakDailyTokens = num(summary?["peakDailyTokens"]).map { Int($0) }
+        let buckets = result?["dailyUsageBuckets"] as? [[String: Any]] ?? []
+        let days = buckets.compactMap { b -> (String, Int)? in
+            guard let d = b["startDate"] as? String, let t = num(b["tokens"]) else { return nil }
+            return (d, Int(t))
+        }
+        if let last = days.max(by: { $0.0 < $1.0 }) {
+            // A daily bucket is a date label, shown as dd/MM/yyyy without timezone shifting.
+            let p = last.0.prefix(10).split(separator: "-")
+            state.snapshot.latestLabel = p.count == 3 ? "\(p[2])/\(p[1])/\(p[0])" : last.0
+            state.snapshot.latestTokens = last.1
+        }
+        return []
+    default:
+        return []
+    }
+}
+
+/// Maps the local-JSONL fallback onto the same card.
+func codexSnapshot(_ s: CodexSummary, now: Date) -> CodexSnapshot {
+    func w(_ l: CodexLimit?, _ minutes: Int) -> CodexWindow? {
+        l.map { CodexWindow(minutes: minutes, remaining: remainingPercent(used: $0.usedPercent, resetsAt: $0.resetsAt, now: now), resets: $0.resetsAt) }
+    }
+    return CodexSnapshot(
+        windows: [w(s.primary, 300), w(s.secondary, 10080)].compactMap { $0 },
+        lifetimeTokens: s.allTime, peakDailyTokens: s.peakDay,
+        latestLabel: "Yesterday", latestTokens: s.yesterday, note: nil, updated: now)
+}
