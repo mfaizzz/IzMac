@@ -13,11 +13,11 @@ A small native macOS menu bar app (SwiftUI, macOS 14+). The menu bar shows somet
 
 ## Install
 
-CI builds `IzMac.zip` on every push to main (Actions artifact). Unzip, then:
+CI builds `IzMac.zip` on every push to main (Actions artifact). Download and unzip it, then:
 
-    scripts/install.sh      # copies build/IzMac.app to /Applications, clears quarantine, opens it
+    mv IzMac.app /Applications/ && xattr -dr com.apple.quarantine /Applications/IzMac.app && open /Applications/IzMac.app
 
-Or build locally on a Mac with Xcode: `scripts/bundle.sh` (produces `build/IzMac.app` and `build/IzMac.zip`, ad-hoc signed). Tests: `swift test`.
+Or build locally on a Mac with Xcode: `scripts/bundle.sh && scripts/install.sh` (produces `build/IzMac.app` and `build/IzMac.zip`, ad-hoc signed). Tests: `swift test`.
 
 ## Data sources
 
