@@ -30,15 +30,15 @@ struct Card<Content: View>: View {
     }
 }
 
-private func primary(_ s: String) -> some View {
+func primary(_ s: String) -> some View {
     Text(s).font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
 }
 
-private func secondary(_ s: String) -> some View {
+func secondary(_ s: String) -> some View {
     Text(s).font(.system(size: 12)).foregroundStyle(.gray)
 }
 
-private func row(_ label: String, _ value: String) -> some View {
+func row(_ label: String, _ value: String) -> some View {
     HStack {
         Text(label).foregroundStyle(.gray)
         Spacer()
@@ -49,6 +49,7 @@ private func row(_ label: String, _ value: String) -> some View {
 
 struct RootView: View {
     @EnvironmentObject var model: Model
+    @EnvironmentObject var charge: ChargeModel
 
     var body: some View {
         VStack(spacing: 10) {
@@ -152,6 +153,7 @@ struct RootView: View {
                 primary("\(b.percent)% · \(b.state)")
                 secondary(capacityText(b))
                 secondary(conditionText(b))
+                QuickCharge()
             } else {
                 secondary("No battery found")
             }
@@ -162,6 +164,8 @@ struct RootView: View {
         VStack(spacing: 6) {
             HStack {
                 Button("Refresh now") { model.refresh(force: true) }.keyboardShortcut("r")
+                Spacer()
+                Button("Open IzMac…") { MainWindow.show(model: model, charge: charge) }
                 Spacer()
                 Toggle("Launch at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
                     .toggleStyle(.switch).controlSize(.small)
@@ -185,4 +189,59 @@ private func conditionText(_ b: BatteryInfo) -> String {
     parts.append("Condition \(b.condition)")
     if let t = b.tempC { parts.append(String(format: "%.1f °C", t)) }
     return parts.joined(separator: " · ")
+}
+
+struct QuickCharge: View {
+    @EnvironmentObject var charge: ChargeModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if charge.running, let s = charge.state {
+                Text(s.status).font(.system(size: 12, weight: .semibold)).foregroundStyle(.red)
+                if charge.supported {
+                    if !charge.config.enabled {
+                        Button("Turn on charge control") { charge.update { $0.enabled = true } }
+                    } else {
+                        LimitSlider()
+                        HStack {
+                            Button(s.mode == "discharge" ? "Stop discharge" : "Discharge") {
+                                charge.send(s.mode == "discharge" ? .cancel : .discharge)
+                            }
+                            .disabled(!charge.has("discharge"))
+                            Button(s.mode == "topUp" ? "Cancel top up" : "Top Up") {
+                                charge.send(s.mode == "topUp" ? .cancel : .topUp)
+                            }
+                        }
+                    }
+                }
+                if charge.needsUpdate { Button("Update helper") { charge.install() }.disabled(charge.busy) }
+            } else {
+                Button(charge.installed ? "Reinstall charge control" : "Enable charge control") { charge.install() }
+                    .disabled(charge.busy)
+                secondary("Needs your admin password once to install a small background helper.")
+                if let e = charge.error { secondary(e) }
+            }
+        }
+        .font(.system(size: 12))
+        .padding(.top, 4)
+    }
+}
+
+struct LimitSlider: View {
+    @EnvironmentObject var charge: ChargeModel
+    @State private var value = 80.0
+    @State private var editing = false
+
+    var body: some View {
+        HStack {
+            Text("Limit: \(Int(value))%").frame(width: 80, alignment: .leading)
+            Slider(value: $value, in: 20...100, step: 1, onEditingChanged: { isEditing in
+                editing = isEditing
+                if !isEditing { charge.update { $0.limit = Int(value) } }
+            })
+        }
+        .font(.system(size: 12, weight: .semibold))
+        .onAppear { value = Double(charge.config.limit) }
+        .onChange(of: charge.config.limit) { _, new in if !editing { value = Double(new) } }
+    }
 }

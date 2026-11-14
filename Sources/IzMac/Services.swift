@@ -119,6 +119,9 @@ struct BatteryInfo {
     var designMAh: Int?
     var tempC: Double?
     var condition: String
+    var plugged = false
+    var adapterWatts: Int?
+    var powerW: Double?      // battery power: positive while charging, negative while discharging
 }
 
 func readBattery() -> BatteryInfo? {
@@ -146,8 +149,20 @@ func readBattery() -> BatteryInfo? {
     // macOS does not expose "Condition" in the registry; this mirrors the 80% service threshold.
     let condition = (maxPercent ?? 100) >= 80 ? "Normal" : "Service Recommended"
 
-    return BatteryInfo(
+    // Amperage is a signed 64-bit value that the registry may report as unsigned.
+    var power: Double?
+    if let mv = (p["Voltage"] as? NSNumber)?.doubleValue, let a = p["Amperage"] as? NSNumber {
+        power = mv * Double(Int64(bitPattern: a.uint64Value)) / 1_000_000
+    }
+    let rawPlugged = p["AppleRawExternalConnected"] as? Bool ?? false
+    let watts = (p["AdapterDetails"] as? [String: Any])?["Watts"] as? Int
+
+    var info = BatteryInfo(
         percent: percent, state: state, cycles: p["CycleCount"] as? Int,
         maxPercent: maxPercent, maxMAh: rawMax, designMAh: design,
         tempC: (p["Temperature"] as? Int).map { Double($0) / 100 }, condition: condition)
+    info.plugged = plugged || rawPlugged
+    info.adapterWatts = watts
+    info.powerW = power
+    return info
 }

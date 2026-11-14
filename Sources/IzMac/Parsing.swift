@@ -236,7 +236,7 @@ struct CodexRPC {
     var failure: String?
 }
 
-let codexHello = #"{"id":0,"method":"initialize","params":{"clientInfo":{"name":"izmac","version":"0.1.0"}}}"#
+let codexHello = #"{"id":0,"method":"initialize","params":{"clientInfo":{"name":"izmac","version":"0.2.0"}}}"#
 
 func windowLabel(_ minutes: Int?) -> String {
     guard let m = minutes, m > 0 else { return "Limit" }

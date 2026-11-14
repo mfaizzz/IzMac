@@ -27,6 +27,7 @@ final class Model: ObservableObject {
     @Published var claude: ClaudeSnapshot?
     @Published var claudeMessage: String? = "Loading..."
     @Published var battery: BatteryInfo?
+    @Published var history: [Sample] = []
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     private var codexBusy = false
@@ -44,7 +45,13 @@ final class Model: ObservableObject {
         return dir.appendingPathComponent("solat.json")
     }()
 
+    private static let historyURL = Model.cacheURL.deletingLastPathComponent().appendingPathComponent("history.json")
+
     init() {
+        if let h = try? Data(contentsOf: Model.historyURL),
+           let samples = try? JSONDecoder.state.decode([Sample].self, from: h) {
+            history = samples
+        }
         if let data = try? Data(contentsOf: Model.cacheURL),
            let c = try? JSONDecoder().decode(SolatCache.self, from: data) {
             solat = c.response
@@ -70,13 +77,14 @@ final class Model: ObservableObject {
     var today: SolatDay? { solat.flatMap { solatToday($0.prayerTime, now: now) } }
     var next: SolatTime? { solat.flatMap { nextPrayer($0.prayerTime, now: now) } }
 
-    var menuTitle: String {
+    func menuTitle(codex showCodex: Bool, claude showClaude: Bool, prayer showPrayer: Bool, battery showBattery: Bool) -> String {
         var parts: [String] = []
-        if let p = codex?.windows.first(where: { $0.minutes == 300 }) {
+        if showBattery, let b = battery { parts.append("\(b.percent)%") }
+        if showCodex, let p = codex?.windows.first(where: { $0.minutes == 300 }) {
             parts.append("Cx \(p.remaining)%")
         }
-        if let f = claude?.five { parts.append("Cl \(f.remaining)%") }
-        if let n = next { parts.append("\(n.name) \(timeText(n.date))") }
+        if showClaude, let f = claude?.five { parts.append("Cl \(f.remaining)%") }
+        if showPrayer, let n = next { parts.append("\(n.name) \(timeText(n.date))") }
         return parts.isEmpty ? "IzMac" : parts.joined(separator: " · ")
     }
 
@@ -90,9 +98,17 @@ final class Model: ObservableObject {
     func refresh(force: Bool = false) {
         now = Date()
         battery = readBattery()
+        recordSample()
         Task { await refreshCodex() }
         Task { await refreshSolat(force: force) }
         Task { await refreshClaude(force: force) }
+    }
+
+    /// One sample per minute, kept for 48 hours.
+    private func recordSample() {
+        guard let b = battery, now.timeIntervalSince(history.last?.t ?? .distantPast) >= 55 else { return }
+        history = appendSample(history, Sample(t: now, pct: Double(b.percent), temp: b.tempC, power: b.powerW))
+        if let d = try? JSONEncoder.state.encode(history) { try? d.write(to: Model.historyURL, options: .atomic) }
     }
 
     func setLaunchAtLogin(_ on: Bool) {
