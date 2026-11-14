@@ -34,7 +34,7 @@ final class Locator: NSObject, CLLocationManagerDelegate {
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        if manager.authorizationStatus == .authorizedAlways || manager.authorizationStatus == .authorizedWhenInUse {
+        if manager.authorizationStatus == .authorizedAlways {
             manager.requestLocation()
         }
     }
