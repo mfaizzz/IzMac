@@ -158,8 +158,21 @@ final class Model: ObservableObject {
         } catch {}
     }
 
+    /// Opt-in: the keychain is only touched after the user presses Connect.
+    func connectClaude() {
+        UserDefaults.standard.set(true, forKey: "claudeConnected")
+        claudeBackoff = .distantPast
+        claudeLast = .distantPast
+        refresh(force: true)
+    }
+
     private func refreshClaude(force: Bool) async {
         let t = Date()
+        guard UserDefaults.standard.bool(forKey: "claudeConnected") else {
+            claude = nil
+            claudeMessage = "Connect to show Claude usage"
+            return
+        }
         if t < claudeBackoff { return }
         if !force && t.timeIntervalSince(claudeLast) < 300 { return }
         claudeLast = t

@@ -141,8 +141,12 @@ struct RootView: View {
                     primary("Week: \(w.remaining)% remaining")
                     if let r = w.resets { secondary(resetText(r)) }
                 }
-            } else {
+            } else if UserDefaults.standard.bool(forKey: "claudeConnected") {
                 secondary(model.claudeMessage ?? "Claude usage unavailable")
+            } else {
+                secondary("Uses your Claude Code sign-in. Asks for keychain access once.")
+                Button("Connect Claude") { model.connectClaude() }
+                    .buttonStyle(.borderless)
             }
         }
     }
