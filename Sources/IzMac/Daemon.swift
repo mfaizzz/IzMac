@@ -49,9 +49,15 @@ final class Daemon {
 
     init() {
         if let smc {
+            // Diagnostics: record what this firmware exposes, so "not supported" can be explained from the log.
+            for k in ["CHTE", "CH0B", "CH0C", "CHIE", "CH0I", "CH0J", ledKey] {
+                log("probe \(k) size=\(smc.size(k).map { String($0) } ?? "missing")")
+            }
             chargeGroup = chargeGroups.first { g in g.allSatisfy { smc.size($0.key) == $0.size } }
             adapterGroup = adapterGroups.first { g in g.allSatisfy { smc.size($0.key) == $0.size } }
             hasLED = smc.size(ledKey) == 1
+        } else {
+            log("probe: AppleSMC unavailable")
         }
     }
 
