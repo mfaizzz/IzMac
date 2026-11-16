@@ -6,6 +6,9 @@ import Security
 // MARK: - Claude OAuth token (never logged, never persisted)
 
 func readClaudeToken() -> String? {
+    // File first: no keychain prompt when Claude Code stores its sign-in as a plain file.
+    let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/.credentials.json")
+    if let token = (try? Data(contentsOf: file)).flatMap(parseClaudeToken) { return token }
     let query: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: "Claude Code-credentials",
@@ -17,8 +20,7 @@ func readClaudeToken() -> String? {
        let data = out as? Data, let token = parseClaudeToken(data) {
         return token
     }
-    let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/.credentials.json")
-    return (try? Data(contentsOf: file)).flatMap(parseClaudeToken)
+    return nil
 }
 
 // MARK: - Codex app-server (blocking; call off the main thread)
