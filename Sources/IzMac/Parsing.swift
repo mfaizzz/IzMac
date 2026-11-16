@@ -134,9 +134,51 @@ struct SolatDay: Codable, Equatable {
     var isha: Double?
 }
 
+/// Wire format: {"zone", "year", "month_number", "prayers": [{"day", "hijri", "imsak", ...}]}.
 struct SolatResponse: Codable, Equatable {
     var zone: String?
     var prayerTime: [SolatDay]
+
+    private struct Wire: Decodable {
+        struct Day: Decodable {
+            let day: Int
+            let hijri: String?
+            let imsak: Double?
+            let fajr: Double?
+            let syuruk: Double?
+            let dhuhr: Double?
+            let asr: Double?
+            let maghrib: Double?
+            let isha: Double?
+        }
+        let zone: String?
+        let year: Int
+        let month_number: Int
+        let prayers: [Day]
+    }
+
+    enum CodingKeys: String, CodingKey { case zone, prayerTime }
+
+    /// Accepts the API shape, or the app's own cache shape (zone + prayerTime).
+    init(from decoder: Decoder) throws {
+        if let w = try? Wire(from: decoder) {
+            zone = w.zone
+            prayerTime = w.prayers.map {
+                SolatDay(date: String(format: "%04ld-%02ld-%02ld", w.year, w.month_number, $0.day), hijri: $0.hijri,
+                         imsak: $0.imsak, fajr: $0.fajr, syuruk: $0.syuruk, dhuhr: $0.dhuhr,
+                         asr: $0.asr, maghrib: $0.maghrib, isha: $0.isha)
+            }
+        } else {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            zone = try c.decodeIfPresent(String.self, forKey: .zone)
+            prayerTime = try c.decode([SolatDay].self, forKey: .prayerTime)
+        }
+    }
+
+    init(zone: String?, prayerTime: [SolatDay]) {
+        self.zone = zone
+        self.prayerTime = prayerTime
+    }
 }
 
 struct SolatTime: Equatable {

@@ -41,9 +41,9 @@ final class IzMacTests: XCTestCase {
     }
 
     let solatJSON = """
-    {"zone":"WLY01","origin":null,"prayerTime":[
-      {"date":"2026-11-14","hijri":"1448-06-03","day":6,"imsak":null,"fajr":1794632400,"syuruk":1794636000,"isyraq":1794636900,"dhuhr":1794657600,"asr":1794668400,"maghrib":1794679200,"isha":1794682800},
-      {"date":"2026-11-15","hijri":"1448-06-04","day":7,"fajr":1794718860,"syuruk":1794722460,"dhuhr":1794744060,"asr":1794754860,"maghrib":1794765660,"isha":1794769260}
+    {"zone":"WLY01","year":2026,"month":"NOV","month_number":11,"last_updated":null,"prayers":[
+      {"day":14,"hijri":"1448-06-03","imsak":null,"fajr":1794632400,"syuruk":1794636000,"dhuha":1794636900,"dhuhr":1794657600,"asr":1794668400,"maghrib":1794679200,"isha":1794682800},
+      {"day":15,"hijri":"1448-06-04","fajr":1794718860,"syuruk":1794722460,"dhuhr":1794744060,"asr":1794754860,"maghrib":1794765660,"isha":1794769260}
     ]}
     """
 
